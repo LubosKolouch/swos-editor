@@ -275,9 +275,19 @@ def load_players_from_db(db_id):
                 }
             )
 
-            # In SWOS, the manager's club can hold up to 30 players (16 core + up to 14 reserve squad)
-            for p_idx in range(30):
-                p_offset = act_offset + 76 + p_idx * 38
+            # In SWOS, the manager's club uses a 30-byte index table at offset 56160..56189
+            # pointing to the active squad slots (0..29), with 0xFF (255) for empty slots.
+            squad_indices = []
+            if len(data) >= 56190:
+                squad_indices = list(data[56160:56190])
+
+            # First add players in the exact order of the active squad table
+            loaded_slots = set()
+            for squad_pos, s_idx in enumerate(squad_indices):
+                if s_idx == 255 or s_idx >= 30:
+                    continue
+                loaded_slots.add(s_idx)
+                p_offset = act_offset + 76 + s_idx * 38
                 if p_offset + 38 > len(data):
                     break
                 p_data = data[p_offset : p_offset + 38]
@@ -289,7 +299,6 @@ def load_players_from_db(db_id):
                     .strip()
                 )
 
-                # Skip empty or corrupted slots
                 if not name or len(name) < 2 or not any(c.isalpha() for c in name):
                     continue
 
@@ -304,7 +313,6 @@ def load_players_from_db(db_id):
                 fitness_val = p_data[37]
                 fitness_pct = round((fitness_val / 255.0) * 100)
 
-                # Status evaluation (injuries / bans from byte 27)
                 status_text = "Fit"
                 status_type = "ok"
                 if (status_code & 0x20) or (status_code & 0x40):
@@ -326,7 +334,8 @@ def load_players_from_db(db_id):
                         "file_offset": p_offset,
                         "team_id": 0,
                         "team_name": act_t_name,
-                        "player_index": p_idx,
+                        "player_index": s_idx,
+                        "squad_position": squad_pos,
                         "number": num,
                         "name": name,
                         "position": pos,
@@ -338,6 +347,63 @@ def load_players_from_db(db_id):
                         "status_code": status_code,
                         "status_text": status_text,
                         "status_type": status_type,
+                        "fitness": fitness_pct,
+                        "fitness_raw": fitness_val,
+                        "is_active_team": True,
+                    }
+                )
+
+            # Also load any remaining valid players in slots 0..29 not yet in squad_indices
+            for s_idx in range(30):
+                if s_idx in loaded_slots:
+                    continue
+                p_offset = act_offset + 76 + s_idx * 38
+                if p_offset + 38 > len(data):
+                    break
+                p_data = data[p_offset : p_offset + 38]
+                name = (
+                    p_data[3:24]
+                    .split(b"\x00")[0]
+                    .decode("latin1", errors="ignore")
+                    .strip()
+                )
+                if (
+                    not name
+                    or len(name) < 2
+                    or not any(c.isalpha() for c in name)
+                    or name.startswith("*ERR*")
+                ):
+                    continue
+
+                pos_code = p_data[26] & 0xE0
+                pos = POSITIONS.get(pos_code, "M")
+                is_gk = pos == "GK"
+                skills = decode_skills(p_data[28:32])
+                price_code = p_data[32]
+                overall = sum(skills) if not is_gk else price_code
+                status_code = p_data[27]
+                fitness_val = p_data[37]
+                fitness_pct = round((fitness_val / 255.0) * 100)
+
+                players.append(
+                    {
+                        "id": len(players),
+                        "file_offset": p_offset,
+                        "team_id": 0,
+                        "team_name": act_t_name,
+                        "player_index": s_idx,
+                        "squad_position": None,
+                        "number": p_data[2],
+                        "name": name,
+                        "position": pos,
+                        "pos_code": pos_code,
+                        "is_gk": is_gk,
+                        "skills": skills,
+                        "price_code": price_code,
+                        "overall": overall,
+                        "status_code": status_code,
+                        "status_text": "Fit",
+                        "status_type": "ok",
                         "fitness": fitness_pct,
                         "fitness_raw": fitness_val,
                         "is_active_team": True,
@@ -435,6 +501,27 @@ def load_players_from_db(db_id):
     return teams, players
 
 
+def sync_career_active_team(fp):
+    """
+    Synchronizes the manager's active squad in career mode:
+    Copies the top 16 match players from the active squad (56192 + 76 + slot*38)
+    according to the 30-byte squad index table (56160..56189) into the domestic
+    league team template at offset 2 + 76..
+    """
+    fp.seek(56160)
+    squad = list(fp.read(30))
+    for pos in range(16):
+        if pos < len(squad):
+            s = squad[pos]
+            if s != 255 and s < 30:
+                src_off = 56192 + 76 + s * 38
+                dst_off = 2 + 76 + pos * 38
+                fp.seek(src_off)
+                rec = fp.read(38)
+                fp.seek(dst_off)
+                fp.write(rec)
+
+
 def transfer_player(db_id, src_player_offset, target_team_id):
     """
     Executes a player transfer to the target team.
@@ -486,20 +573,25 @@ def transfer_player(db_id, src_player_offset, target_team_id):
         fp.seek(dst_offset)
         fp.write(rec_src)
 
-        # Synchronization for the active squad in career mode
+        # Synchronization for career mode active team
         if is_career:
+            # Ensure squad index table includes the target slot if transferred into active team
             act_start = 56192 + 76
-            act_end = act_start + 16 * 38
-            # If src was in the active core squad (0-15), mirror into league slot 0
-            if act_start <= src_player_offset < act_end:
-                s0_off = (src_player_offset - act_start) + (2 + 76)
-                fp.seek(s0_off)
-                fp.write(rec_dst)
-            # If dst was in the active core squad (0-15), mirror into league slot 0
+            act_end = act_start + 30 * 38
             if act_start <= dst_offset < act_end:
-                s0_off = (dst_offset - act_start) + (2 + 76)
-                fp.seek(s0_off)
-                fp.write(rec_src)
+                slot_idx = (dst_offset - act_start) // 38
+                fp.seek(56160)
+                squad = bytearray(fp.read(30))
+                if slot_idx not in squad:
+                    # Place into first empty (255) squad position
+                    for idx, val in enumerate(squad):
+                        if val == 255:
+                            squad[idx] = slot_idx
+                            break
+                    fp.seek(56160)
+                    fp.write(squad)
+
+            sync_career_active_team(fp)
 
     return True
 
@@ -509,8 +601,10 @@ def save_player(db_id, player_offset, data):
     clean_id = os.path.basename(db_id)
     if clean_id.upper().endswith(".CAR"):
         filepath = os.path.join(BASE_DIR, clean_id)
+        is_career = True
     else:
         filepath = os.path.join(DATA_DIR, clean_id)
+        is_career = False
 
     backup_file(filepath)
 
@@ -552,16 +646,8 @@ def save_player(db_id, player_offset, data):
         fp.seek(player_offset)
         fp.write(rec)
 
-        # When modifying the active manager team in a career save (offset 56192 + 76..),
-        # synchronize the corresponding player into league slot 0 (offset 2 + 76..),
-        # keeping team sheets consistent across all SWOS league views and tables.
-        if clean_id.upper().endswith(".CAR"):
-            act_p_start = 56192 + 76
-            act_p_end = act_p_start + 16 * 38
-            if act_p_start <= player_offset < act_p_end:
-                slot0_offset = (player_offset - act_p_start) + (2 + 76)
-                fp.seek(slot0_offset)
-                fp.write(rec)
+        if is_career:
+            sync_career_active_team(fp)
 
     # Handle transfer to another team if requested
     if "target_team_id" in data and data["target_team_id"] is not None:
