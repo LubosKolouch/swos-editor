@@ -19,6 +19,11 @@ import glob
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "DATA")
 
+def set_base_dir(custom_path):
+    global BASE_DIR, DATA_DIR
+    BASE_DIR = os.path.abspath(custom_path)
+    DATA_DIR = os.path.join(BASE_DIR, "DATA")
+
 POSITIONS = {
     0x00: "GK",
     0x20: "RB",
@@ -1155,6 +1160,13 @@ async function init() {
 
   const dbSelect = document.getElementById("dbSelect");
   dbSelect.innerHTML = "";
+
+  if (allDatabases.length > 0) {
+    if (!allDatabases.some(db => db.id === currentDbId)) {
+      currentDbId = allDatabases[0].id;
+    }
+  }
+
   allDatabases.forEach(db => {
     const opt = document.createElement("option");
     opt.value = db.id;
@@ -1712,15 +1724,20 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="SWOS 96/97 Save & Player Editor")
+    parser.add_argument("--dir", type=str, default=None, help="Cesta ke složce se SWOS (výchozí: složka se skriptem)")
     parser.add_argument("--port", type=int, default=8096, help="Port pro webové rozhraní (výchozí: 8096)")
     parser.add_argument("--no-browser", action="store_true", help="Neotevírat automaticky prohlížeč")
     args = parser.parse_args()
+
+    if args.dir:
+        set_base_dir(args.dir)
 
     port = args.port
     server = HTTPServer(("127.0.0.1", port), RequestHandler)
     url = f"http://127.0.0.1:{port}"
     print("=" * 60)
     print(f"⚽ SWOS 96/97 Editor spuštěn na: {url}")
+    print(f"   Adresář hry: {BASE_DIR}")
     print("   Pro ukončení stiskněte Ctrl+C v terminálu.")
     print("=" * 60)
     if not args.no_browser:
