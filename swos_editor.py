@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Editor hráčů a kariér (Save & Player Editor) pro Sensible World of Soccer (SWOS 96/97) pro DOS.
-Podporuje přímou editaci všech 80 souborů lig a zemí (DATA/TEAM.*) i uložených kariér (*.CAR).
-Umožňuje řazení, vyhledávání, inline editaci dovedností (Passing, Shooting, Heading, Tackling, Control, Speed, Finishing), čísel dresů, jmen a pozic.
+Save & Player Editor for Sensible World of Soccer (SWOS 96/97 PC DOS).
+Supports direct editing of all 80 league/country files (DATA/TEAM.*) and career saves (*.CAR).
+Provides sorting, searching, inline editing of skills (Passing, Shooting, Heading, Tackling, Control, Speed, Finishing), shirt numbers, names, and positions.
 """
 
 import sys
@@ -58,7 +58,7 @@ SKILLS_DEF = [
 
 
 def decode_skills(b4):
-    """Rozbalí 4 bajty na 7 dovedností (oficiální SWOS stupnice 0-7)."""
+    """Unpacks 4 bytes into 7 skill values (official SWOS 0-7 scale)."""
     p = b4[0] & 0x07
     sh = (b4[1] >> 4) & 0x07
     h = b4[1] & 0x07
@@ -70,7 +70,7 @@ def decode_skills(b4):
 
 
 def encode_skills(skills):
-    """Zabalí 7 dovedností (stupnice 0-7) do 4 bajtů."""
+    """Packs 7 skill values (0-7 scale) into 4 bytes."""
     vals = [max(0, min(7, int(v))) for v in skills]
     while len(vals) < 7:
         vals.append(0)
@@ -83,9 +83,9 @@ def encode_skills(skills):
 
 
 def list_databases():
-    """Najde všechny dostupné databáze lig a uložené kariéry."""
+    """Discovers all available league databases (DATA/TEAM.*) and saved careers (*.CAR)."""
     dbs = []
-    # 1. Ligové soubory v DATA/TEAM.*
+    # 1. League files in DATA/TEAM.*
     team_files = sorted(glob.glob(os.path.join(DATA_DIR, "TEAM.*")))
     for f in team_files:
         fname = os.path.basename(f)
@@ -107,7 +107,7 @@ def list_databases():
         except Exception:
             pass
 
-    # 2. Uložené kariéry (*.CAR)
+    # 2. Saved careers (*.CAR)
     car_files = sorted(glob.glob(os.path.join(BASE_DIR, "*.CAR")) + glob.glob(os.path.join(BASE_DIR, "*.car")))
     for f in car_files:
         fname = os.path.basename(f)
@@ -122,16 +122,16 @@ def list_databases():
 
 
 def backup_file(filepath):
-    """Vytvoří záložní kopii souboru, pokud ještě neexistuje."""
+    """Creates a safety backup copy of the file if one does not already exist."""
     bak = filepath + ".bak"
     if not os.path.exists(bak) and os.path.exists(filepath):
         shutil.copy2(filepath, bak)
-        print(f"[Záloha] Vytvořena záloha: {bak}")
+        print(f"[Backup] Created safety backup: {bak}")
 
 
 def load_players_from_db(db_id):
-    """Načte týmy a hráče ze zvolené databáze nebo kariéry."""
-    # Ochrana před path traversal
+    """Loads teams and players from the specified database or career file."""
+    # Prevent path traversal
     clean_id = os.path.basename(db_id)
     if clean_id.upper().endswith(".CAR"):
         filepath = os.path.join(BASE_DIR, clean_id)
@@ -141,7 +141,7 @@ def load_players_from_db(db_id):
         is_career = False
 
     if not os.path.exists(filepath):
-        raise FileNotFoundError(f"Soubor {filepath} neexistuje!")
+        raise FileNotFoundError(f"File {filepath} not found!")
 
     with open(filepath, "rb") as f:
         data = f.read()
@@ -150,7 +150,7 @@ def load_players_from_db(db_id):
     players = []
 
     if not is_career:
-        # Standardní TEAM.XXX soubor
+        # Standard TEAM.XXX league file
         num_teams = int.from_bytes(data[:2], "big")
         for t_idx in range(num_teams):
             t_offset = 2 + t_idx * 684
@@ -176,21 +176,21 @@ def load_players_from_db(db_id):
                 fitness_val = p_data[37]
                 fitness_pct = round((fitness_val / 255.0) * 100) if is_career else 100
 
-                # Vyhodnocení stavu (zranění / tresty z bajtu 27)
-                status_text = "V pořádku"
+                # Status evaluation (injuries / bans from byte 27)
+                status_text = "Fit"
                 status_type = "ok"
                 if is_career:
                     if (status_code & 0x20) or (status_code & 0x40):
-                        status_text = "🚑 Zraněn"
+                        status_text = "🚑 Injured"
                         status_type = "injured"
                     elif (status_code & 0x80) or (status_code & 0x08):
-                        status_text = "🟥 Trest (Stop)"
+                        status_text = "🟥 Banned"
                         status_type = "banned"
                     elif (status_code & 0x04):
-                        status_text = "🟨 Žlutá karta"
+                        status_text = "🟨 Yellow Card"
                         status_type = "warning"
                     elif fitness_pct < 60:
-                        status_text = "⚠️ Vyčerpán"
+                        status_text = "⚠️ Tired"
                         status_type = "tired"
 
                 players.append({
@@ -215,21 +215,21 @@ def load_players_from_db(db_id):
                     "is_active_team": False
                 })
     else:
-        # Kariéra (.CAR)
-        # 1. Aktivní tým hráče (s reálnými přestupy) je uložen v bloku trenéra na offsetu 56192!
-        # 2. Ostatní týmy ligy / pohárů začínají na offsetu 2 (slot 0 byl původní šablona aktivního týmu).
+        # Career save file (.CAR)
+        # 1. The manager's active squad (with actual transfers) is stored in the career block at offset 56192!
+        # 2. Other league / cup teams start at offset 2 (slot 0 was the original pre-career template).
         num_teams = int.from_bytes(data[:2], "little")
         if num_teams <= 0 or num_teams > 200:
             num_teams = 80
 
-        # Nejprve načteme aktivní tým manažera na offsetu 56192
+        # First load the manager's active team at offset 56192
         act_offset = 56192
         if act_offset + 684 <= len(data):
             act_data = data[act_offset : act_offset + 684]
             act_t_name = act_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
             act_coach = act_data[36:60].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
-            coach_str = f" (trenér: {act_coach})" if act_coach else ""
-            display_name = f"⭐ {act_t_name}{coach_str} [TVŮJ TÝM]"
+            coach_str = f" (manager: {act_coach})" if act_coach else ""
+            display_name = f"⭐ {act_t_name}{coach_str} [YOUR TEAM]"
 
             teams.append({
                 "id": 0,
@@ -240,7 +240,7 @@ def load_players_from_db(db_id):
                 "is_active": True
             })
 
-            # V SWOS má klub manažera až 30 hráčů (16 základních + až 14 rezervních na střídačce/tribuně)
+            # In SWOS, the manager's club can hold up to 30 players (16 core + up to 14 reserve squad)
             for p_idx in range(30):
                 p_offset = act_offset + 76 + p_idx * 38
                 if p_offset + 38 > len(data):
@@ -249,7 +249,7 @@ def load_players_from_db(db_id):
                 num = p_data[2]
                 name = p_data[3:24].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
 
-                # Ignorujeme prázdné nebo poškozené sloty
+                # Skip empty or corrupted slots
                 if not name or len(name) < 2 or not any(c.isalpha() for c in name):
                     continue
 
@@ -264,20 +264,20 @@ def load_players_from_db(db_id):
                 fitness_val = p_data[37]
                 fitness_pct = round((fitness_val / 255.0) * 100)
 
-                # Vyhodnocení stavu (zranění / tresty z bajtu 27)
-                status_text = "V pořádku"
+                # Status evaluation (injuries / bans from byte 27)
+                status_text = "Fit"
                 status_type = "ok"
                 if (status_code & 0x20) or (status_code & 0x40):
-                    status_text = "🚑 Zraněn"
+                    status_text = "🚑 Injured"
                     status_type = "injured"
                 elif (status_code & 0x80) or (status_code & 0x08):
-                    status_text = "🟥 Trest (Stop)"
+                    status_text = "🟥 Banned"
                     status_type = "banned"
                 elif (status_code & 0x04):
-                    status_text = "🟨 Žlutá karta"
+                    status_text = "🟨 Yellow Card"
                     status_type = "warning"
                 elif fitness_pct < 60:
-                    status_text = "⚠️ Vyčerpán"
+                    status_text = "⚠️ Tired"
                     status_type = "tired"
 
                 players.append({
@@ -302,7 +302,7 @@ def load_players_from_db(db_id):
                     "is_active_team": True
                 })
 
-        # Nyní načteme ostatní soupeře (týmy 1 až num_teams-1) ze sekce ligy
+        # Next load opponent teams (teams 1 to num_teams-1) from the league section
         for t_idx in range(1, num_teams):
             t_offset = 2 + t_idx * 684
             if t_offset + 684 > len(data):
@@ -310,7 +310,8 @@ def load_players_from_db(db_id):
             t_data = data[t_offset : t_offset + 684]
             t_name = t_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
             coach = t_data[36:60].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
-            display_name = f"{t_name} (trenér: {coach})" if coach else t_name
+            coach_str = f" (manager: {coach})" if coach else ""
+            display_name = f"{t_name}{coach_str}"
 
             teams.append({
                 "id": len(teams),
@@ -378,10 +379,10 @@ def load_players_from_db(db_id):
 
 def transfer_player(db_id, src_player_offset, target_team_id):
     """
-    Provede přestup hráče do cílového týmu.
-    V SWOS má každý tým pevně alokované sloty (16 hráčů v ligách TEAM.* i u soupeřů v .CAR; až 30 u uživatelského týmu).
-    Přestup se provede výměnou (swapem) 38-bajtového záznamu hráče se slotem v cílovém týmu
-    (přednostně na stejné pozici, případně na volném/posledním slotu).
+    Executes a player transfer to the target team.
+    In SWOS, each team has fixed allocated player slots (16 players in leagues TEAM.* and opponent teams in .CAR; up to 30 in user team).
+    The transfer is carried out by swapping the 38-byte player record with a slot in the target team
+    (preferring the same tactical position, or the last available slot).
     """
     clean_id = os.path.basename(db_id)
     if clean_id.upper().endswith(".CAR"):
@@ -394,20 +395,20 @@ def transfer_player(db_id, src_player_offset, target_team_id):
     backup_file(filepath)
     teams, players = load_players_from_db(db_id)
 
-    # Najdeme zdrojového hráče
+    # Locate the source player
     src_player = next((p for p in players if p["file_offset"] == src_player_offset), None)
     if not src_player:
-        raise ValueError(f"Zdrojový hráč na offsetu {src_player_offset} nenalezen!")
+        raise ValueError(f"Source player at offset {src_player_offset} not found!")
 
     if src_player["team_id"] == target_team_id:
-        return True  # Žádná změna
+        return True  # No change required
 
-    # Najdeme hráče cílového týmu
+    # Locate target team players
     target_players = [p for p in players if p["team_id"] == target_team_id]
     if not target_players:
-        raise ValueError(f"Cílový tým #{target_team_id} nemá žádné hráče!")
+        raise ValueError(f"Target team #{target_team_id} has no players!")
 
-    # Hledáme nejvhodnějšího hráče pro výměnu: stejná pozice, jinak podle indexu
+    # Find the most suitable player slot to swap: same position, or fallback to the last player
     same_pos = [p for p in target_players if p["position"] == src_player["position"]]
     swap_target = same_pos[0] if same_pos else target_players[-1]
     dst_offset = swap_target["file_offset"]
@@ -418,22 +419,22 @@ def transfer_player(db_id, src_player_offset, target_team_id):
         fp.seek(dst_offset)
         rec_dst = fp.read(38)
 
-        # Prohodíme záznamy
+        # Swap records
         fp.seek(src_player_offset)
         fp.write(rec_dst)
         fp.seek(dst_offset)
         fp.write(rec_src)
 
-        # Synchronizace pro aktivní tým v kariéře
+        # Synchronization for the active squad in career mode
         if is_career:
             act_start = 56192 + 76
             act_end = act_start + 16 * 38
-            # Pokud src byl v aktivním týmu 0-15, zrcadlíme do slotu 0
+            # If src was in the active core squad (0-15), mirror into league slot 0
             if act_start <= src_player_offset < act_end:
                 s0_off = (src_player_offset - act_start) + (2 + 76)
                 fp.seek(s0_off)
                 fp.write(rec_dst)
-            # Pokud dst byl v aktivním týmu 0-15, zrcadlíme do slotu 0
+            # If dst was in the active core squad (0-15), mirror into league slot 0
             if act_start <= dst_offset < act_end:
                 s0_off = (dst_offset - act_start) + (2 + 76)
                 fp.seek(s0_off)
@@ -443,7 +444,7 @@ def transfer_player(db_id, src_player_offset, target_team_id):
 
 
 def save_player(db_id, player_offset, data):
-    """Zapíše změny hráče přímo na jeho offset v souboru (včetně případného přestupu)."""
+    """Writes player modifications directly to the file offset (including any transfer)."""
     clean_id = os.path.basename(db_id)
     if clean_id.upper().endswith(".CAR"):
         filepath = os.path.join(BASE_DIR, clean_id)
@@ -468,7 +469,7 @@ def save_player(db_id, player_offset, data):
             pos_str = str(data["position"]).strip().upper()
             pos_lookup = {v: k for k, v in POSITIONS.items()}
             if pos_str in pos_lookup:
-                # Zachováme spodní bity (barvu pleti/vlasů)
+                # Preserve lower 5 bits (skin/hair color attributes)
                 rec[26] = (rec[26] & 0x1F) | pos_lookup[pos_str]
 
         if "price_code" in data:
@@ -490,9 +491,9 @@ def save_player(db_id, player_offset, data):
         fp.seek(player_offset)
         fp.write(rec)
 
-        # Pokud upravujeme aktivní tým v kariéře (offset 56192 + 76..),
-        # synchronizujeme odpovídajícího hráče i v ligovém slotu 0 (offset 2 + 76..),
-        # aby byla data konzistentní ve všech ligových tabulkách a zobrazeních SWOS.
+        # When modifying the active manager team in a career save (offset 56192 + 76..),
+        # synchronize the corresponding player into league slot 0 (offset 2 + 76..),
+        # keeping team sheets consistent across all SWOS league views and tables.
         if clean_id.upper().endswith(".CAR"):
             act_p_start = 56192 + 76
             act_p_end = act_p_start + 16 * 38
@@ -501,7 +502,7 @@ def save_player(db_id, player_offset, data):
                 fp.seek(slot0_offset)
                 fp.write(rec)
 
-    # Pokud byl požadován přestup do jiného týmu
+    # Handle transfer to another team if requested
     if "target_team_id" in data and data["target_team_id"] is not None:
         target_team_id = int(data["target_team_id"])
         transfer_player(db_id, player_offset, target_team_id)
@@ -826,7 +827,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </div>
 
 <script>
-let currentDbId = 'TEAM.008'; // Výchozí: Anglická liga
+let currentDbId = 'TEAM.008'; // Default: English League
 let allDatabases = [];
 let allTeams = [];
 let allPlayers = [];
@@ -1732,9 +1733,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="SWOS 96/97 Save & Player Editor")
-    parser.add_argument("--dir", type=str, default=None, help="Cesta ke složce se SWOS (výchozí: složka se skriptem)")
-    parser.add_argument("--port", type=int, default=8096, help="Port pro webové rozhraní (výchozí: 8096)")
-    parser.add_argument("--no-browser", action="store_true", help="Neotevírat automaticky prohlížeč")
+    parser.add_argument("--dir", type=str, default=None, help="Path to SWOS directory (default: script directory)")
+    parser.add_argument("--port", type=int, default=8096, help="Port for web interface (default: 8096)")
+    parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser")
     args = parser.parse_args()
 
     if args.dir:
@@ -1744,16 +1745,16 @@ def main():
     server = HTTPServer(("127.0.0.1", port), RequestHandler)
     url = f"http://127.0.0.1:{port}"
     print("=" * 60)
-    print(f"⚽ SWOS 96/97 Editor spuštěn na: {url}")
-    print(f"   Adresář hry: {BASE_DIR}")
-    print("   Pro ukončení stiskněte Ctrl+C v terminálu.")
+    print(f"⚽ SWOS 96/97 Editor running at: {url}")
+    print(f"   Game directory: {BASE_DIR}")
+    print("   Press Ctrl+C in terminal to stop.")
     print("=" * 60)
     if not args.no_browser:
         webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nServer ukončen.")
+        print("\nServer stopped.")
 
 
 if __name__ == "__main__":
