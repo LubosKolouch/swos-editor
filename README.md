@@ -4,7 +4,7 @@
 
 Supports editing both the main league database files (`TEAM.*`) and career save files (`*.CAR`) directly from a modern web browser interface with real-time persistence.
 
-![SWOS 96/97 Editor Screenshot](screenshot-en.png)
+![SWOS 96/97 Editor Screenshot](screenshot-v2.png)
 
 ---
 
@@ -14,7 +14,7 @@ Supports editing both the main league database files (`TEAM.*`) and career save 
   - Edit all national leagues and teams from `DATA/TEAM.*`.
   - Edit saved careers (`*.CAR`), properly loading and writing back the manager's active squad at offset `56192` (including substitutes/reserves up to 30 players) as well as league teams from offset `2`.
 - **Player Attribute & Skill Editing**:
-  - Direct inline editing of all 7 SWOS skills (Passing, Shooting, Heading, Tackling, Control, Speed, Finishing) on a scale of `0 - 15`.
+  - Direct inline editing of all 7 SWOS skills (Passing, Shooting, Heading, Tackling, Control, Speed, Finishing) on the official SWOS scale of `0 - 7`.
   - Automatic recalculation of player overall score.
   - Shirt number (`#`) modification.
 - **Career Health & Fitness Management**:

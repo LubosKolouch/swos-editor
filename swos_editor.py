@@ -58,27 +58,27 @@ SKILLS_DEF = [
 
 
 def decode_skills(b4):
-    """Rozbalí 4 bajty na 7 dovedností (každá 0-15)."""
-    p = b4[0] & 0x0F
-    sh = (b4[1] >> 4) & 0x0F
-    h = b4[1] & 0x0F
-    t = (b4[2] >> 4) & 0x0F
-    c = b4[2] & 0x0F
-    s = (b4[3] >> 4) & 0x0F
-    f = b4[3] & 0x0F
+    """Rozbalí 4 bajty na 7 dovedností (oficiální SWOS stupnice 0-7)."""
+    p = b4[0] & 0x07
+    sh = (b4[1] >> 4) & 0x07
+    h = b4[1] & 0x07
+    t = (b4[2] >> 4) & 0x07
+    c = b4[2] & 0x07
+    s = (b4[3] >> 4) & 0x07
+    f = b4[3] & 0x07
     return [p, sh, h, t, c, s, f]
 
 
 def encode_skills(skills):
-    """Zabalí 7 dovedností do 4 bajtů."""
-    vals = [max(0, min(15, int(v))) for v in skills]
+    """Zabalí 7 dovedností (stupnice 0-7) do 4 bajtů."""
+    vals = [max(0, min(7, int(v))) for v in skills]
     while len(vals) < 7:
         vals.append(0)
     p, sh, h, t, c, s, f = vals[:7]
-    b0 = p & 0x0F
-    b1 = ((sh & 0x0F) << 4) | (h & 0x0F)
-    b2 = ((t & 0x0F) << 4) | (c & 0x0F)
-    b3 = ((s & 0x0F) << 4) | (f & 0x0F)
+    b0 = p & 0x07
+    b1 = ((sh & 0x07) << 4) | (h & 0x07)
+    b2 = ((t & 0x07) << 4) | (c & 0x07)
+    b3 = ((s & 0x07) << 4) | (f & 0x07)
     return bytes([b0, b1, b2, b3])
 
 
@@ -457,30 +457,35 @@ def save_player(db_id, player_offset, data):
         rec = bytearray(fp.read(38))
 
         if "number" in data:
-            rec[2] = int(data["number"]) & 0xFF
+            num = max(1, min(99, int(data["number"])))
+            rec[2] = num & 0xFF
 
         if "name" in data:
-            raw_name = data["name"].strip().encode("latin1", errors="ignore")[:20]
+            raw_name = str(data["name"]).strip().encode("latin1", errors="ignore")[:20]
             rec[3:24] = raw_name.ljust(21, b"\x00")
 
         if "position" in data:
-            pos_str = data["position"].upper()
+            pos_str = str(data["position"]).strip().upper()
             pos_lookup = {v: k for k, v in POSITIONS.items()}
             if pos_str in pos_lookup:
                 # Zachováme spodní bity (barvu pleti/vlasů)
                 rec[26] = (rec[26] & 0x1F) | pos_lookup[pos_str]
+
+        if "price_code" in data:
+            price = max(0, min(255, int(data["price_code"])))
+            rec[32] = price & 0xFF
 
         if "skills" in data:
             new_skills_bytes = encode_skills(data["skills"])
             rec[28:32] = new_skills_bytes
 
         if "fitness" in data:
-            # fitness je 0-100%, přepočítáme na 0-255 pro byte 37
             fit_pct = max(0, min(100, int(data["fitness"])))
             rec[37] = round((fit_pct / 100.0) * 255)
 
         if "status_code" in data:
-            rec[27] = int(data["status_code"]) & 0xFF
+            sc = max(0, min(255, int(data["status_code"])))
+            rec[27] = sc & 0xFF
 
         fp.seek(player_offset)
         fp.write(rec)
@@ -738,7 +743,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <option value="A">Útočníci (A)</option>
   </select>
   <span style="font-size: 0.85rem; color: var(--text-muted);" id="tableCount">Zobrazeno: 0</span>
-  <span id="tableHint" style="font-size: 0.82rem; color: var(--accent); margin-left: auto;">⚡ <b>Dovednosti (0-15) i dres (#) lze přepsat přímo v buňce + Enter.</b> Automaticky se uloží do hry!</span>
+  <span id="tableHint" style="font-size: 0.82rem; color: var(--accent); margin-left: auto;">⚡ <b>Skills (0-7) and shirt (#) can be edited directly in cells + Enter.</b> Automatically saved into game!</span>
 </div>
 
 <div class="table-scroll">
@@ -809,7 +814,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div id="modalSkillsSection">
-      <div class="card-title" id="lbl_mSkillsTitle">Herní dovednosti (0 - 15)</div>
+      <div class="card-title" id="lbl_mSkillsTitle">Herní dovednosti (0 - 7)</div>
       <div class="attr-grid" id="modalAttrContainer"></div>
     </div>
 
@@ -844,7 +849,7 @@ const I18N = {
     posD: "Obránci (D, RB, LB)",
     posM: "Záložníci (M, RW, LW)",
     posA: "Útočníci (A)",
-    tableHint: "⚡ <b>Dovednosti (0-15) i dres (#) lze přepsat přímo v buňce + Enter.</b> Automaticky se uloží do hry!",
+    tableHint: "⚡ <b>Dovednosti (0-7) i dres (#) lze přepsat přímo v buňce + Enter.</b> Automaticky se uloží do hry!",
     fitTooltip: "Klikněte a přepište kondici (0-100%)",
     nameTooltip: "Kliknutím otevřete kartu hráče",
     // Table cols
@@ -887,7 +892,7 @@ const I18N = {
     lblMFit: "❤️ Kondice / Fitness (0 - 100 %)",
     lblMStatus: "🚑 Stav hráče (Zdraví / Trest)",
     lblMTeam: "🔄 Tým (Přestup / Výměna do jiného týmu)",
-    lblMSkillsTitle: "Herní dovednosti (0 - 15)",
+    lblMSkillsTitle: "Herní dovednosti (0 - 7)",
     btnCancel: "Zrušit",
     btnSave: "💾 Uložit změny do SWOS",
     // Positions in modal
@@ -926,7 +931,7 @@ const I18N = {
     posD: "Defenders (D, RB, LB)",
     posM: "Midfielders (M, RW, LW)",
     posA: "Attackers (A)",
-    tableHint: "⚡ <b>Skills (0-15) and shirt (#) can be edited directly in cells + Enter.</b> Automatically saved into game!",
+    tableHint: "⚡ <b>Skills (0-7) and shirt (#) can be edited directly in cells + Enter.</b> Automatically saved into game!",
     fitTooltip: "Click to edit fitness (0-100%)",
     nameTooltip: "Click to open player card",
     // Table cols
@@ -969,7 +974,7 @@ const I18N = {
     lblMFit: "❤️ Fitness (0 - 100 %)",
     lblMStatus: "🚑 Player Status (Health / Ban)",
     lblMTeam: "🔄 Team (Transfer / Swap to another team)",
-    lblMSkillsTitle: "Player Skills (0 - 15)",
+    lblMSkillsTitle: "Player Skills (0 - 7)",
     btnCancel: "Cancel",
     btnSave: "💾 Save changes to SWOS",
     // Positions in modal
@@ -1331,14 +1336,14 @@ function renderTable() {
         `;
       } else if (c.key === 'overall') {
         const val = p.overall || 0;
-        td.innerHTML = `<b class="${val >= 60 ? 'val-high' : (val >= 35 ? 'val-mid' : 'val-low')}">${p.is_gk ? 'GK' : val}</b>`;
+        td.innerHTML = `<b class="${val >= 28 ? 'val-high' : (val >= 14 ? 'val-mid' : 'val-low')}">${p.is_gk ? 'GK' : val}</b>`;
       } else if (c.skillIdx !== undefined) {
         if (p.is_gk) {
           td.innerHTML = `<span style="color:#64748b;">-</span>`;
         } else {
           const val = p.skills[c.skillIdx] || 0;
-          const colorCls = val >= 13 ? 'val-high' : (val >= 8 ? 'val-mid' : (val <= 3 ? 'val-low' : ''));
-          td.innerHTML = `<input type="text" class="inline-num ${colorCls}" value="${val}" onfocus="this.select()" onchange="onInlineSkillChange(${p.id}, ${c.skillIdx}, this)" onkeydown="if(event.key==='Enter') this.blur();">`;
+          const colorCls = val >= 6 ? 'val-high' : (val >= 4 ? 'val-mid' : (val <= 1 ? 'val-low' : ''));
+          td.innerHTML = `<input type="number" min="0" max="7" class="inline-num ${colorCls}" value="${val}" onfocus="this.select()" onchange="onInlineSkillChange(${p.id}, ${c.skillIdx}, this)" onkeydown="if(event.key==='Enter') this.blur();">`;
         }
       } else {
         td.textContent = p[c.key] || '';
@@ -1384,7 +1389,7 @@ async function onInlineTeamChange(playerId, selectEl) {
 async function onInlineSkillChange(playerId, skillIdx, inputEl) {
   let val = parseInt(inputEl.value);
   if (isNaN(val)) val = 0;
-  val = Math.max(0, Math.min(15, val));
+  val = Math.max(0, Math.min(7, val));
   inputEl.value = val;
 
   const player = allPlayers.find(p => p.id === playerId);
@@ -1521,9 +1526,9 @@ async function onInlineStatusChange(playerId, selectEl) {
 
 function updateInputColor(el, val) {
   el.classList.remove('val-high', 'val-mid', 'val-low');
-  if (val >= 13) el.classList.add('val-high');
-  else if (val >= 8) el.classList.add('val-mid');
-  else if (val <= 3) el.classList.add('val-low');
+  if (val >= 6) el.classList.add('val-high');
+  else if (val >= 4) el.classList.add('val-mid');
+  else if (val <= 1) el.classList.add('val-low');
 }
 
 function openEditModal(playerId) {
@@ -1581,13 +1586,13 @@ function renderModalSkills() {
   container.innerHTML = "";
 
   SKILLS.forEach(s => {
-    const val = selectedPlayer.skills[s.idx] || 0;
+    const val = Math.max(0, Math.min(7, selectedPlayer.skills[s.idx] || 0));
     const div = document.createElement("div");
     div.className = "form-group";
     div.innerHTML = `
       <label>${s.label}</label>
       <div class="attr-slider-wrap">
-        <input type="range" min="0" max="15" value="${val}" id="m_skill_${s.idx}" oninput="document.getElementById('m_val_${s.idx}').textContent = this.value">
+        <input type="range" min="0" max="7" value="${val}" id="m_skill_${s.idx}" oninput="document.getElementById('m_val_${s.idx}').textContent = this.value">
         <span class="attr-val" id="m_val_${s.idx}">${val}</span>
       </div>
     `;
@@ -1602,7 +1607,10 @@ async function saveModalPlayer() {
   if (!selectedPlayer.is_gk) {
     for (let i = 0; i < 7; i++) {
       const input = document.getElementById(`m_skill_${i}`);
-      newSkills.push(input ? parseInt(input.value) : 0);
+      let v = input ? parseInt(input.value) : 0;
+      if (isNaN(v)) v = 0;
+      v = Math.max(0, Math.min(7, v));
+      newSkills.push(v);
     }
   } else {
     newSkills.push(0, 0, 0, 0, 0, 0, 0);
