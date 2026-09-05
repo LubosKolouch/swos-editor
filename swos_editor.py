@@ -2,12 +2,11 @@
 """
 Save & Player Editor for Sensible World of Soccer (SWOS 96/97 PC DOS).
 Supports direct editing of all 80 league/country files (DATA/TEAM.*) and career saves (*.CAR).
-Provides sorting, searching, inline editing of skills (Passing, Shooting, Heading, Tackling, Control, Speed, Finishing), shirt numbers, names, and positions.
+Provides sorting, searching, inline editing of skills (Passing, Shooting, Heading,
+Tackling, Control, Speed, Finishing), shirt numbers, names, and positions.
 """
 
-import sys
 import os
-import struct
 import shutil
 import json
 import argparse
@@ -19,10 +18,13 @@ import glob
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "DATA")
 
+
 def set_base_dir(custom_path):
+    """Sets the root SWOS directory and corresponding DATA folder."""
     global BASE_DIR, DATA_DIR
     BASE_DIR = os.path.abspath(custom_path)
     DATA_DIR = os.path.join(BASE_DIR, "DATA")
+
 
 POSITIONS = {
     0x00: "GK",
@@ -32,7 +34,7 @@ POSITIONS = {
     0x80: "RW",
     0xA0: "LW",
     0xC0: "M",
-    0xE0: "A"
+    0xE0: "A",
 }
 
 POS_NAMES = {
@@ -43,7 +45,7 @@ POS_NAMES = {
     "RW": "Pravé křídlo (RW)",
     "LW": "Levé křídlo (LW)",
     "M": "Záložník (M)",
-    "A": "Útočník (A)"
+    "A": "Útočník (A)",
 }
 
 SKILLS_DEF = [
@@ -53,7 +55,7 @@ SKILLS_DEF = [
     ("tackling", "Odebírání míče (Tackling)", 3),
     ("control", "Kontrola míče (Control)", 4),
     ("speed", "Rychlost (Speed)", 5),
-    ("finishing", "Zakončení (Finishing)", 6)
+    ("finishing", "Zakončení (Finishing)", 6),
 ]
 
 
@@ -95,29 +97,41 @@ def list_databases():
                 sample_name = ""
                 if cnt > 0:
                     t = fp.read(684)
-                    sample_name = t[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
-                dbs.append({
-                    "id": fname,
-                    "name": f"Liga / Země: {fname} ({cnt} týmů, např. {sample_name})",
-                    "path": f,
-                    "type": "team",
-                    "count": cnt,
-                    "sample": sample_name
-                })
+                    sample_name = (
+                        t[5:23]
+                        .split(b"\x00")[0]
+                        .decode("latin1", errors="ignore")
+                        .strip()
+                    )
+                dbs.append(
+                    {
+                        "id": fname,
+                        "name": f"Liga / Země: {fname} ({cnt} týmů, např. {sample_name})",
+                        "path": f,
+                        "type": "team",
+                        "count": cnt,
+                        "sample": sample_name,
+                    }
+                )
         except Exception:
             pass
 
     # 2. Saved careers (*.CAR)
-    car_files = sorted(glob.glob(os.path.join(BASE_DIR, "*.CAR")) + glob.glob(os.path.join(BASE_DIR, "*.car")))
+    car_files = sorted(
+        glob.glob(os.path.join(BASE_DIR, "*.CAR"))
+        + glob.glob(os.path.join(BASE_DIR, "*.car"))
+    )
     for f in car_files:
         fname = os.path.basename(f)
-        dbs.append({
-            "id": fname,
-            "name": f"💾 Uložená kariéra: {fname}",
-            "path": f,
-            "type": "career",
-            "count": 0
-        })
+        dbs.append(
+            {
+                "id": fname,
+                "name": f"💾 Uložená kariéra: {fname}",
+                "path": f,
+                "type": "career",
+                "count": 0,
+            }
+        )
     return dbs
 
 
@@ -157,17 +171,24 @@ def load_players_from_db(db_id):
             if t_offset + 684 > len(data):
                 break
             t_data = data[t_offset : t_offset + 684]
-            t_name = t_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+            t_name = (
+                t_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+            )
             teams.append({"id": t_idx, "name": t_name})
 
             for p_idx in range(16):
                 p_offset = t_offset + 76 + p_idx * 38
                 p_data = t_data[76 + p_idx * 38 : 76 + (p_idx + 1) * 38]
                 num = p_data[2]
-                name = p_data[3:24].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+                name = (
+                    p_data[3:24]
+                    .split(b"\x00")[0]
+                    .decode("latin1", errors="ignore")
+                    .strip()
+                )
                 pos_code = p_data[26] & 0xE0
                 pos = POSITIONS.get(pos_code, "M")
-                is_gk = (pos == "GK")
+                is_gk = pos == "GK"
                 skills = decode_skills(p_data[28:32])
                 price_code = p_data[32]
                 overall = sum(skills) if not is_gk else price_code
@@ -186,34 +207,36 @@ def load_players_from_db(db_id):
                     elif (status_code & 0x80) or (status_code & 0x08):
                         status_text = "🟥 Banned"
                         status_type = "banned"
-                    elif (status_code & 0x04):
+                    elif status_code & 0x04:
                         status_text = "🟨 Yellow Card"
                         status_type = "warning"
                     elif fitness_pct < 60:
                         status_text = "⚠️ Tired"
                         status_type = "tired"
 
-                players.append({
-                    "id": len(players),
-                    "file_offset": p_offset,
-                    "team_id": t_idx,
-                    "team_name": t_name,
-                    "player_index": p_idx,
-                    "number": num,
-                    "name": name,
-                    "position": pos,
-                    "pos_code": pos_code,
-                    "is_gk": is_gk,
-                    "skills": skills,
-                    "price_code": price_code,
-                    "overall": overall,
-                    "status_code": status_code,
-                    "status_text": status_text,
-                    "status_type": status_type,
-                    "fitness": fitness_pct,
-                    "fitness_raw": fitness_val,
-                    "is_active_team": False
-                })
+                players.append(
+                    {
+                        "id": len(players),
+                        "file_offset": p_offset,
+                        "team_id": t_idx,
+                        "team_name": t_name,
+                        "player_index": p_idx,
+                        "number": num,
+                        "name": name,
+                        "position": pos,
+                        "pos_code": pos_code,
+                        "is_gk": is_gk,
+                        "skills": skills,
+                        "price_code": price_code,
+                        "overall": overall,
+                        "status_code": status_code,
+                        "status_text": status_text,
+                        "status_type": status_type,
+                        "fitness": fitness_pct,
+                        "fitness_raw": fitness_val,
+                        "is_active_team": False,
+                    }
+                )
     else:
         # Career save file (.CAR)
         # 1. The manager's active squad (with actual transfers) is stored in the career block at offset 56192!
@@ -226,19 +249,31 @@ def load_players_from_db(db_id):
         act_offset = 56192
         if act_offset + 684 <= len(data):
             act_data = data[act_offset : act_offset + 684]
-            act_t_name = act_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
-            act_coach = act_data[36:60].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+            act_t_name = (
+                act_data[5:23]
+                .split(b"\x00")[0]
+                .decode("latin1", errors="ignore")
+                .strip()
+            )
+            act_coach = (
+                act_data[36:60]
+                .split(b"\x00")[0]
+                .decode("latin1", errors="ignore")
+                .strip()
+            )
             coach_str = f" (manager: {act_coach})" if act_coach else ""
             display_name = f"⭐ {act_t_name}{coach_str} [YOUR TEAM]"
 
-            teams.append({
-                "id": 0,
-                "name": display_name,
-                "raw_name": act_t_name,
-                "coach": act_coach,
-                "offset": act_offset,
-                "is_active": True
-            })
+            teams.append(
+                {
+                    "id": 0,
+                    "name": display_name,
+                    "raw_name": act_t_name,
+                    "coach": act_coach,
+                    "offset": act_offset,
+                    "is_active": True,
+                }
+            )
 
             # In SWOS, the manager's club can hold up to 30 players (16 core + up to 14 reserve squad)
             for p_idx in range(30):
@@ -247,7 +282,12 @@ def load_players_from_db(db_id):
                     break
                 p_data = data[p_offset : p_offset + 38]
                 num = p_data[2]
-                name = p_data[3:24].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+                name = (
+                    p_data[3:24]
+                    .split(b"\x00")[0]
+                    .decode("latin1", errors="ignore")
+                    .strip()
+                )
 
                 # Skip empty or corrupted slots
                 if not name or len(name) < 2 or not any(c.isalpha() for c in name):
@@ -255,7 +295,7 @@ def load_players_from_db(db_id):
 
                 pos_code = p_data[26] & 0xE0
                 pos = POSITIONS.get(pos_code, "M")
-                is_gk = (pos == "GK")
+                is_gk = pos == "GK"
                 skills = decode_skills(p_data[28:32])
                 price_code = p_data[32]
                 overall = sum(skills) if not is_gk else price_code
@@ -273,34 +313,36 @@ def load_players_from_db(db_id):
                 elif (status_code & 0x80) or (status_code & 0x08):
                     status_text = "🟥 Banned"
                     status_type = "banned"
-                elif (status_code & 0x04):
+                elif status_code & 0x04:
                     status_text = "🟨 Yellow Card"
                     status_type = "warning"
                 elif fitness_pct < 60:
                     status_text = "⚠️ Tired"
                     status_type = "tired"
 
-                players.append({
-                    "id": len(players),
-                    "file_offset": p_offset,
-                    "team_id": 0,
-                    "team_name": act_t_name,
-                    "player_index": p_idx,
-                    "number": num,
-                    "name": name,
-                    "position": pos,
-                    "pos_code": pos_code,
-                    "is_gk": is_gk,
-                    "skills": skills,
-                    "price_code": price_code,
-                    "overall": overall,
-                    "status_code": status_code,
-                    "status_text": status_text,
-                    "status_type": status_type,
-                    "fitness": fitness_pct,
-                    "fitness_raw": fitness_val,
-                    "is_active_team": True
-                })
+                players.append(
+                    {
+                        "id": len(players),
+                        "file_offset": p_offset,
+                        "team_id": 0,
+                        "team_name": act_t_name,
+                        "player_index": p_idx,
+                        "number": num,
+                        "name": name,
+                        "position": pos,
+                        "pos_code": pos_code,
+                        "is_gk": is_gk,
+                        "skills": skills,
+                        "price_code": price_code,
+                        "overall": overall,
+                        "status_code": status_code,
+                        "status_text": status_text,
+                        "status_type": status_type,
+                        "fitness": fitness_pct,
+                        "fitness_raw": fitness_val,
+                        "is_active_team": True,
+                    }
+                )
 
         # Next load opponent teams (teams 1 to num_teams-1) from the league section
         for t_idx in range(1, num_teams):
@@ -308,27 +350,41 @@ def load_players_from_db(db_id):
             if t_offset + 684 > len(data):
                 break
             t_data = data[t_offset : t_offset + 684]
-            t_name = t_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
-            coach = t_data[36:60].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+            t_name = (
+                t_data[5:23].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+            )
+            coach = (
+                t_data[36:60]
+                .split(b"\x00")[0]
+                .decode("latin1", errors="ignore")
+                .strip()
+            )
             coach_str = f" (manager: {coach})" if coach else ""
             display_name = f"{t_name}{coach_str}"
 
-            teams.append({
-                "id": len(teams),
-                "name": display_name,
-                "raw_name": t_name,
-                "offset": t_offset,
-                "is_active": False
-            })
+            teams.append(
+                {
+                    "id": len(teams),
+                    "name": display_name,
+                    "raw_name": t_name,
+                    "offset": t_offset,
+                    "is_active": False,
+                }
+            )
 
             for p_idx in range(16):
                 p_offset = t_offset + 76 + p_idx * 38
                 p_data = t_data[76 + p_idx * 38 : 76 + (p_idx + 1) * 38]
                 num = p_data[2]
-                name = p_data[3:24].split(b"\x00")[0].decode("latin1", errors="ignore").strip()
+                name = (
+                    p_data[3:24]
+                    .split(b"\x00")[0]
+                    .decode("latin1", errors="ignore")
+                    .strip()
+                )
                 pos_code = p_data[26] & 0xE0
                 pos = POSITIONS.get(pos_code, "M")
-                is_gk = (pos == "GK")
+                is_gk = pos == "GK"
                 skills = decode_skills(p_data[28:32])
                 price_code = p_data[32]
                 overall = sum(skills) if not is_gk else price_code
@@ -345,34 +401,36 @@ def load_players_from_db(db_id):
                 elif (status_code & 0x80) or (status_code & 0x08):
                     status_text = "🟥 Trest (Stop)"
                     status_type = "banned"
-                elif (status_code & 0x04):
+                elif status_code & 0x04:
                     status_text = "🟨 Žlutá karta"
                     status_type = "warning"
                 elif fitness_pct < 60:
                     status_text = "⚠️ Vyčerpán"
                     status_type = "tired"
 
-                players.append({
-                    "id": len(players),
-                    "file_offset": p_offset,
-                    "team_id": len(teams) - 1,
-                    "team_name": t_name,
-                    "player_index": p_idx,
-                    "number": num,
-                    "name": name,
-                    "position": pos,
-                    "pos_code": pos_code,
-                    "is_gk": is_gk,
-                    "skills": skills,
-                    "price_code": price_code,
-                    "overall": overall,
-                    "status_code": status_code,
-                    "status_text": status_text,
-                    "status_type": status_type,
-                    "fitness": fitness_pct,
-                    "fitness_raw": fitness_val,
-                    "is_active_team": False
-                })
+                players.append(
+                    {
+                        "id": len(players),
+                        "file_offset": p_offset,
+                        "team_id": len(teams) - 1,
+                        "team_name": t_name,
+                        "player_index": p_idx,
+                        "number": num,
+                        "name": name,
+                        "position": pos,
+                        "pos_code": pos_code,
+                        "is_gk": is_gk,
+                        "skills": skills,
+                        "price_code": price_code,
+                        "overall": overall,
+                        "status_code": status_code,
+                        "status_text": status_text,
+                        "status_type": status_type,
+                        "fitness": fitness_pct,
+                        "fitness_raw": fitness_val,
+                        "is_active_team": False,
+                    }
+                )
 
     return teams, players
 
@@ -380,7 +438,8 @@ def load_players_from_db(db_id):
 def transfer_player(db_id, src_player_offset, target_team_id):
     """
     Executes a player transfer to the target team.
-    In SWOS, each team has fixed allocated player slots (16 players in leagues TEAM.* and opponent teams in .CAR; up to 30 in user team).
+    In SWOS, each team has fixed allocated player slots (16 players in leagues TEAM.*
+    and opponent teams in .CAR; up to 30 in user team).
     The transfer is carried out by swapping the 38-byte player record with a slot in the target team
     (preferring the same tactical position, or the last available slot).
     """
@@ -393,10 +452,12 @@ def transfer_player(db_id, src_player_offset, target_team_id):
         is_career = False
 
     backup_file(filepath)
-    teams, players = load_players_from_db(db_id)
+    _, players = load_players_from_db(db_id)
 
     # Locate the source player
-    src_player = next((p for p in players if p["file_offset"] == src_player_offset), None)
+    src_player = next(
+        (p for p in players if p["file_offset"] == src_player_offset), None
+    )
     if not src_player:
         raise ValueError(f"Source player at offset {src_player_offset} not found!")
 
@@ -562,18 +623,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   td.cell-team { text-align: left; color: var(--text-muted); }
 
   /* Inline inputs */
-  input.inline-num { 
-    width: 44px; 
-    text-align: center; 
-    padding: 5px 2px; 
-    font-size: 0.9rem; 
-    font-weight: 700; 
-    border-radius: 5px; 
-    border: 1px solid rgba(255,255,255,0.1); 
-    background: #162638; 
-    color: #fff; 
-    outline: none; 
-    transition: all 0.15s; 
+  input.inline-num {
+    width: 44px;
+    text-align: center;
+    padding: 5px 2px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    border-radius: 5px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: #162638;
+    color: #fff;
+    outline: none;
+    transition: all 0.15s;
     cursor: text;
   }
   input.inline-num:hover { border-color: var(--accent); background: #1b2f45; }
@@ -1666,11 +1727,14 @@ init();
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    """HTTP request handler providing API endpoints and web UI for SWOS editor."""
+
+    def do_GET(self):  # pylint: disable=invalid-name
+        """Handles HTTP GET requests for HTML page and API reads."""
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
 
-        if parsed.path == "/" or parsed.path == "/index.html":
+        if parsed.path in ("/", "/index.html"):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -1694,7 +1758,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"teams": teams, "players": players, "db_id": db_id}).encode("utf-8"))
+                self.wfile.write(
+                    json.dumps(
+                        {"teams": teams, "players": players, "db_id": db_id}
+                    ).encode("utf-8")
+                )
             except Exception as e:
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")
@@ -1704,7 +1772,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def do_POST(self):
+    def do_POST(self):  # pylint: disable=invalid-name
+        """Handles HTTP POST requests for saving player edits."""
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/save":
             content_len = int(self.headers.get("Content-Length", 0))
@@ -1722,20 +1791,32 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+                self.wfile.write(
+                    json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
+                )
         else:
             self.send_response(404)
             self.end_headers()
 
-    def log_message(self, format, *args):
-        pass
+    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
+        """Suppresses default HTTP server logging to keep terminal output clean."""
 
 
 def main():
+    """Main CLI entrypoint for launching SWOS Editor server."""
     parser = argparse.ArgumentParser(description="SWOS 96/97 Save & Player Editor")
-    parser.add_argument("--dir", type=str, default=None, help="Path to SWOS directory (default: script directory)")
-    parser.add_argument("--port", type=int, default=8096, help="Port for web interface (default: 8096)")
-    parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser")
+    parser.add_argument(
+        "--dir",
+        type=str,
+        default=None,
+        help="Path to SWOS directory (default: script directory)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8096, help="Port for web interface (default: 8096)"
+    )
+    parser.add_argument(
+        "--no-browser", action="store_true", help="Do not automatically open browser"
+    )
     args = parser.parse_args()
 
     if args.dir:
