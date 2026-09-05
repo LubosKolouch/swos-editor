@@ -4,7 +4,7 @@
 
 Supports editing both the main league database files (`TEAM.*`) and career save files (`*.CAR`) directly from a modern web browser interface with real-time persistence.
 
-![SWOS 96/97 Editor Screenshot](screenshot.png)
+![SWOS 96/97 Editor Screenshot](screenshot-en.png)
 
 ---
 
